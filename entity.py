@@ -8,7 +8,7 @@ class DatabaseError(Exception):
 
 
 class DataIsNotSaveError(Exception):
-    print
+    pass
 
 
 class InvalidPropertyName(Exception):
