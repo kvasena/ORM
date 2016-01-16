@@ -7,16 +7,8 @@ class DatabaseError(Exception):
     pass
 
 
-class NotFoundError(Exception):
-    pass
-
-
 class DataIsNotSaveError(Exception):
-    pass
-
-
-class SQLStatementError(Exception):
-    pass
+    print
 
 
 class InvalidPropertyName(Exception):
@@ -57,6 +49,12 @@ class Entity(object):
         if self.__modified:
             raise DataIsNotSaveError()
         self.__load()
+        if name in self._parents:
+            return self._get_parent(name)
+        if name in self._children.keys():
+            return self._get_children(self._children[name])
+        if name in self._siblings.keys():
+            return self._get_siblings(self._siblings[name])
         return self._get_column(name)
 
     def __setattr__(self, name, value):
@@ -76,19 +74,20 @@ class Entity(object):
 
     def __insert(self):
         query = self.__insert_query.format(
-            table=self.__table,
-            columns=', '.join(self.__fields.keys()),
-            placeholders=', '.join(['%s'] * len(self.__fields.keys()))
+                table=self.__table,
+                columns=', '.join(self.__fields.keys()),
+                placeholders=', '.join(['%s'] * len(self.__fields.keys()))
         )
         self.__execute_query(query, self.__fields.values())
         self.__id = self.__cursor.fetchone()['{table}_id'.format(table=self.__table)]
 
     def __load(self):
-        if self.__loaded:
+        if self.__id is None or self.__loaded is True:
             return
         query = self.__select_query.format(table=self.__table)
         self.__execute_query(query, (self.__id,))
         self.__fields = self.__cursor.fetchone()
+
         self.__loaded = True
 
     def __update(self):
@@ -99,9 +98,19 @@ class Entity(object):
         self.__execute_query(query, (self.__id,))
 
     def _get_children(self, name):
-        # return an array of child entity instances
-        # each child instance must have an id and be filled with data
-        pass
+        import models
+
+        query = self.__parent_query.format(table=name.lower(), parent=self.__table)
+        self.__execute_query(query, (self.__id, ))
+
+        for row in self.__cursor:
+            children_id = row['{table}_id'.format(table=name.lower())]
+            class_name = name[0].upper() + name[1:]
+            cls = getattr(models, class_name)
+            instance = cls(children_id)
+            instance.__fields = row
+            instance.__loaded = True
+            yield instance
 
     def _get_column(self, name):
         field_name = '{table}_{name}'.format(table=self.__table, name=name)
@@ -112,27 +121,40 @@ class Entity(object):
         return self.__fields[field_name]
 
     def _get_parent(self, name):
-        # ORM part 2
-        # get parent id from fields with <name>_id as a key
-        # return an instance of parent entity class with an appropriate id
-        pass
+        import models
+
+        parent_id = self.__fields["{name}_id".format(name=name)]
+        query = self.__parent_query.format(table=self.__table, parent=name)
+        self.__execute_query(query, (parent_id, ))
+        class_name = name[0].upper() + name[1:]
+        cls = getattr(models, class_name)
+        instance = cls(parent_id)
+
+        return instance
 
     def _get_siblings(self, name):
-        # ORM part 2
-        # get parent id from fields with <name>_id as a key
-        # return an array of sibling entity instances
-        # each sibling instance must have an id and be filled with data
-        pass
+        import models
+
+        join_table = '{table1}_{table2}'.format(table1=name.lower(), table2=self.__table)
+        query = self.__sibling_query.format(sibling=name.lower(), join_table=join_table, table=self.__table)
+        self.__execute_query(query, (self.__id, ))
+        for row in self.__cursor:
+            sibling_id = row['{table}_id'.format(table=name.lower())]
+            cls = getattr(models, name)
+            instance = cls(sibling_id)
+            instance.__fields = row
+            instance.__loaded = True
+            yield instance
 
     def _set_column(self, name, value):
         self.__fields['{table}_{name}'.format(table=self.__table, name=name)] = value
         self.__modified = True
 
     def _set_parent(self, name, value):
-        # ORM part 2
-        # put new value into fields array with <name>_id as a key
-        # value can be a number or an instance of Entity subclass
-        pass
+        column_name = '{parent}_id'.format(parent=name)
+        if isinstance(value, Entity):
+            value = value.__id
+        self.__fields[column_name] = value
 
     @classmethod
     def all(cls):
